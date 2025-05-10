@@ -1,0 +1,20 @@
+[
+{
+  "directory": "D:/temp/build",
+  "command": "\"C:\\C compiler\\mingw64\\bin\\c++.exe\" -std=c++20 -o CMakeFiles\\KARATSUBA_MULTIPLICATION.dir\\src\\main.cpp.obj -c D:\\temp\\src\\main.cpp",
+  "file": "D:\\temp\\src\\main.cpp",
+  "output": "CMakeFiles\\KARATSUBA_MULTIPLICATION.dir\\src\\main.cpp.obj"
+},
+{
+  "directory": "D:/temp/build",
+  "command": "\"C:\\C compiler\\mingw64\\bin\\c++.exe\" -std=c++20 -o CMakeFiles\\KARATSUBA_MULTIPLICATION.dir\\src\\Karatsuba_multiplication.cpp.obj -c D:\\temp\\src\\Karatsuba_multiplication.cpp",
+  "file": "D:\\temp\\src\\Karatsuba_multiplication.cpp",
+  "output": "CMakeFiles\\KARATSUBA_MULTIPLICATION.dir\\src\\Karatsuba_multiplication.cpp.obj"
+},
+{
+  "directory": "D:/temp/build",
+  "command": "\"C:\\C compiler\\mingw64\\bin\\c++.exe\" -std=c++20 -o CMakeFiles\\KARATSUBA_MULTIPLICATION.dir\\src\\timer.cpp.obj -c D:\\temp\\src\\timer.cpp",
+  "file": "D:\\temp\\src\\timer.cpp",
+  "output": "CMakeFiles\\KARATSUBA_MULTIPLICATION.dir\\src\\timer.cpp.obj"
+}
+]

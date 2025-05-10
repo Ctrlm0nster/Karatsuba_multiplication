@@ -1,0 +1,3 @@
+D:/temp/build/CMakeFiles/KARATSUBA_MULTIPLICATION.dir
+D:/temp/build/CMakeFiles/edit_cache.dir
+D:/temp/build/CMakeFiles/rebuild_cache.dir
