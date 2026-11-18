@@ -1,40 +1,35 @@
-// STL headers
+// Compatibility entry point - see apps/karatsuba_cli.cpp for the primary CLI
+// application
 #include <iostream>
-#include <string>
-// User-defined headers
-#include "Binary_multiplication.hpp"
-#include "Karatsuba_multiplication.hpp"
-#include "timer.hpp"
-int main() {
-  Timer timer;
-  timer.Start();
-  std::cout << "11001 * 10101 = "
-    << Karatsuba_base2_multiplication::multiply("11001", "10101") << '\n';
-  std::cout << "1101 * 10101 = "
-    << Karatsuba_base2_multiplication::multiply("1101", "10101") << '\n';
-  std::cout << "111 * 10101 = "
-    << Karatsuba_base2_multiplication::multiply("111", "10101") << '\n';
-  std::cout << "11 * 10101 = "
-    << Karatsuba_base2_multiplication::multiply("11", "10101") << '\n';
-  std::cout << "01 * 10101 = "
-    << Karatsuba_base2_multiplication::multiply("01", "10101") << '\n';
-  std::cout << "1111 * 1111 = "
-    << Karatsuba_base2_multiplication::multiply("1111", "1111") << '\n';
-  std::cout << "111 * 1111 = "
-    << Karatsuba_base2_multiplication::multiply("111", "1111") << '\n';
-  timer.Stop();
-  timer.DisplayTime();
 
-  Timer timer2;
-  timer2.Start();
-  std::cout << "11001 * 10101 = " << binaryMultiplication("11001", "10101") << '\n';
-  std::cout << "1101 * 10101 = " << binaryMultiplication("1101", "10101") << '\n';
-  std::cout << "111 * 10101 = " << binaryMultiplication("111", "10101") << '\n';
-  std::cout << "11 * 10101 = " << binaryMultiplication("11", "10101") << '\n';
-  std::cout << "01 * 10101 = " << binaryMultiplication("01", "10101") << '\n';
-  std::cout << "1111 * 1111 = " << binaryMultiplication("1111", "1111") << '\n';
-  std::cout << "111 * 1111 = " << binaryMultiplication("111", "1111") << '\n';
-  timer2.Stop();
-  timer2.DisplayTime();
-  return 0;
+#include "karatsuba/karatsuba.hpp"
+#include "karatsuba/parser.hpp"
+#include "karatsuba/schoolbook.hpp"
+#include "karatsuba/terminal_color.hpp"
+#include "karatsuba/timer.hpp"
+
+int main(int argc, char* argv[]) {
+  if (argc != 3) {
+    std::cout << "Usage: " << argv[0] << " <left> <right>\n"
+              << "For full features, use the karatsuba_cli application.\n";
+    return 1;
+  }
+
+  mpz_class left;
+  mpz_class right;
+  if (!karatsuba::parseInteger(argv[1], left) || !karatsuba::parseInteger(argv[2], right)) {
+    std::cerr << "Error parsing operands.\n";
+    return 2;
+  }
+
+  const mpz_class kProd = karatsuba::multiply(left, right);
+  const mpz_class sProd = karatsuba::schoolbook(left, right);
+
+  std::cout << "Product (decimal): " << kProd.get_str() << '\n';
+  if (kProd == sProd) {
+    std::cout << "Karatsuba and schoolbook agree.\n";
+    return 0;
+  }
+  std::cerr << "Mismatch between Karatsuba and schoolbook!\n";
+  return 3;
 }

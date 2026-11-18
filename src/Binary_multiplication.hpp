@@ -1,9 +1,5 @@
 #pragma once
-#include <algorithm>
-#include <string>
 
-int binaryToDecimal(const std::string& binary);
+#include "karatsuba/schoolbook.hpp"
 
-std::string decimalToBinary(int decimal);
-
-std::string binaryMultiplication(const std::string& a, const std::string& b);
+using km::schoolbook;

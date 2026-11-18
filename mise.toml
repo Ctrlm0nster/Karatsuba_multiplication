@@ -1,0 +1,50 @@
+# mise.toml - Project configuration and task automation
+# See https://mise.jdx.dev for documentation.
+
+[env]
+CMAKE_BUILD_TYPE = "Release"
+CMAKE_EXPORT_COMPILE_COMMANDS = "1"
+
+[tasks.configure]
+description = "Configure CMake build tree"
+run = "cmake -S . -B build -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+
+[tasks.build]
+description = "Build all project targets (library, CLI, benchmark, tests)"
+depends = ["configure"]
+run = "cmake --build build -j"
+
+[tasks.test]
+description = "Execute the unit test suite via CTest"
+depends = ["build"]
+run = "ctest --test-dir build --output-on-failure"
+
+[tasks.benchmark]
+description = "Run the Karatsuba vs Schoolbook multiplication benchmark"
+depends = ["build"]
+run = "./build/karatsuba_benchmark"
+
+[tasks.cli]
+description = "Run the Karatsuba interactive CLI calculator"
+depends = ["build"]
+run = "./build/karatsuba_cli"
+
+[tasks.clean]
+description = "Clean CMake build artifacts"
+run = "rm -rf build build-sanitize"
+
+[tasks.format]
+description = "Auto-format all C++ source and header files with clang-format"
+run = "clang-format -i include/karatsuba/*.hpp src/*.cpp apps/*.cpp benchmarks/*.cpp tests/*.cpp"
+
+[tasks.check-format]
+description = "Verify formatting against .clang-format without altering files"
+run = "clang-format --dry-run --Werror include/karatsuba/*.hpp src/*.cpp apps/*.cpp benchmarks/*.cpp tests/*.cpp"
+
+[tasks.sanitize]
+description = "Build and run test suite with AddressSanitizer and UndefinedBehaviorSanitizer"
+run = """
+cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DKARATSUBA_ENABLE_ASAN=ON -DKARATSUBA_ENABLE_UBSAN=ON
+cmake --build build-sanitize -j
+ctest --test-dir build-sanitize --output-on-failure
+"""

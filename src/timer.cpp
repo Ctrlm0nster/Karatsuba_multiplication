@@ -1,68 +1,97 @@
-#include "timer.hpp"
-#include <chrono>
-#include <mutex>
-#include <ratio>
+#include "karatsuba/timer.hpp"
 
-// Default Constructor
-Timer::Timer() : m_IsRunning(false) { Reset(); }
+#include <iomanip>
+#include <iostream>
 
-// Starts the timer
-void Timer::Start() {
-  bool expected = false;
-  if (m_IsRunning.compare_exchange_strong(expected, true)) {
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    m_startTime = std::chrono::high_resolution_clock::now();
+namespace km {
+
+Timer::Timer() {
+  reset();
+}
+
+void Timer::start() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (!m_isRunning) {
+    m_startTime = Clock::now();
+    m_isRunning = true;
   }
 }
 
-// Stop the timer
-void Timer::Stop() {
-  bool expected = true;
-  if (m_IsRunning.compare_exchange_strong(expected, false)) {
-    std::lock_guard<std::mutex> lock(m_Mutex);
-    m_endTime = std::chrono::high_resolution_clock::now();
+void Timer::stop() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_isRunning) {
+    m_endTime = Clock::now();
+    m_isRunning = false;
   }
 }
 
-// Reset the clock
-void Timer::Reset() {
-  std::lock_guard<std::mutex> lock(m_Mutex);
-  m_startTime = std::chrono::high_resolution_clock::now();
+void Timer::reset() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_startTime = Clock::now();
   m_endTime = m_startTime;
-  m_IsRunning.store(false);
+  m_isRunning = false;
 }
 
-double Timer::GetSeconds() const {
-  std::lock_guard<std::mutex> lock(m_Mutex);
-  std::chrono::time_point<std::chrono::high_resolution_clock> endTime;
-
-  if (m_IsRunning.load()) {
-    endTime = std::chrono::high_resolution_clock::now();
-  }
-  else {
-    endTime = m_endTime;
-  }
-  return std::chrono::duration<double>(endTime - m_startTime).count();
+void Timer::restart() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_startTime = Clock::now();
+  m_endTime = m_startTime;
+  m_isRunning = true;
 }
 
-double Timer::GetMilliseconds() const {
-  std::lock_guard<std::mutex> lock(m_Mutex);
-  std::chrono::time_point<std::chrono::high_resolution_clock> endTime;
+bool Timer::isRunning() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_isRunning;
+}
 
-  if (m_IsRunning.load()) {
-    endTime = std::chrono::high_resolution_clock::now();
-  }
-  else {
-    endTime = m_endTime;
-  }
-  return std::chrono::duration<double, std::milli>(endTime - m_startTime)
-    .count();
+double Timer::elapsedSeconds() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  const auto end = m_isRunning ? Clock::now() : m_endTime;
+  return std::chrono::duration<double>(end - m_startTime).count();
+}
+
+double Timer::elapsedMilliseconds() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  const auto end = m_isRunning ? Clock::now() : m_endTime;
+  return std::chrono::duration<double, std::milli>(end - m_startTime).count();
+}
+
+double Timer::elapsedMicroseconds() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  const auto end = m_isRunning ? Clock::now() : m_endTime;
+  return std::chrono::duration<double, std::micro>(end - m_startTime).count();
+}
+
+std::int64_t Timer::elapsedNanoseconds() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  const auto end = m_isRunning ? Clock::now() : m_endTime;
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(end - m_startTime).count();
 }
 
 void Timer::DisplayTime() const {
-  double seconds = GetSeconds();
-  double milliseconds = GetMilliseconds();
-
-  std::cout << "Elapsed Time: " << seconds << " seconds" << '\n';
-  std::cout << "Elapsed Time: " << milliseconds << " milliseconds" << '\n';
+  const double seconds = elapsedSeconds();
+  const double milliseconds = elapsedMilliseconds();
+  std::cout << std::fixed << std::setprecision(6) << "Elapsed Time: " << seconds << " seconds ("
+            << milliseconds << " ms)\n";
 }
+
+ScopedTimer::ScopedTimer(std::string name) : m_name(std::move(name)), m_callback(nullptr) {
+  m_timer.start();
+}
+
+ScopedTimer::ScopedTimer(Callback callback) : m_name(""), m_callback(std::move(callback)) {
+  m_timer.start();
+}
+
+ScopedTimer::~ScopedTimer() {
+  m_timer.stop();
+  const double elapsed = m_timer.elapsedMilliseconds();
+  if (m_callback) {
+    m_callback(elapsed);
+  } else if (!m_name.empty()) {
+    std::cout << "[Timer] " << m_name << ": " << std::fixed << std::setprecision(3) << elapsed
+              << " ms\n";
+  }
+}
+
+}  // namespace km
