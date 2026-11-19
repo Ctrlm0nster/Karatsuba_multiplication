@@ -66,3 +66,27 @@ TEST_CASE(Schoolbook, RandomizedStress) {
     ASSERT_EQ(actual, expected);
   }
 }
+
+TEST_CASE(Schoolbook, InPlaceAliasing) {
+  gmp_randclass rng(gmp_randinit_mt);
+  rng.seed(4242UL);
+
+  for (std::size_t bits : {64, 256, 1024}) {
+    mpz_class a = rng.get_z_bits(bits);
+    mpz_class b = rng.get_z_bits(bits);
+    const mpz_class expected = a * b;
+
+    mpz_class resA = a;
+    schoolbook_impl(resA.get_mpz_t(), resA.get_mpz_t(), b.get_mpz_t());
+    ASSERT_EQ(resA, expected);
+
+    mpz_class resB = b;
+    schoolbook_impl(resB.get_mpz_t(), a.get_mpz_t(), resB.get_mpz_t());
+    ASSERT_EQ(resB, expected);
+
+    // Square in place
+    mpz_class resSq = a;
+    schoolbook_impl(resSq.get_mpz_t(), resSq.get_mpz_t(), resSq.get_mpz_t());
+    ASSERT_EQ(resSq, a * a);
+  }
+}

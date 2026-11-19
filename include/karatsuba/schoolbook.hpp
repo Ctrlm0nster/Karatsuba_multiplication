@@ -1,8 +1,14 @@
 #pragma once
 
+#include <gmp.h>
 #include <gmpxx.h>
 
 namespace km {
+
+/**
+ * @brief Low-level schoolbook multiplication writing directly into rop.
+ */
+void schoolbook_impl(mpz_ptr rop, mpz_srcptr left, mpz_srcptr right);
 
 /**
  * @brief Multiplies two arbitrary-precision integers using classical

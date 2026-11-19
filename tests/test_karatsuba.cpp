@@ -126,3 +126,59 @@ TEST_CASE(Karatsuba, RandomizedFuzzStress) {
     ASSERT_EQ(actual, expected);
   }
 }
+
+TEST_CASE(Karatsuba, ParallelMultiplication) {
+  gmp_randclass rng(gmp_randinit_mt);
+  rng.seed(12345UL);
+
+  for (std::size_t limbs : {64, 128, 256, 512}) {
+    const mp_bitcnt_t bits = static_cast<mp_bitcnt_t>(limbs) * GMP_NUMB_BITS;
+    mpz_class x = rng.get_z_bits(bits);
+    mpz_class y = rng.get_z_bits(bits);
+    mpz_setbit(x.get_mpz_t(), bits - 1);
+    mpz_setbit(y.get_mpz_t(), bits - 1);
+
+    const mpz_class expected = x * y;
+    const mpz_class actualParallel = multiply_parallel(x, y, DEFAULT_CUTOFF, 64);
+    ASSERT_EQ(actualParallel, expected);
+  }
+}
+
+TEST_CASE(Karatsuba, InPlaceAliasing) {
+  gmp_randclass rng(gmp_randinit_mt);
+  rng.seed(5432UL);
+
+  for (std::size_t limbs : {16, 48, 128}) {
+    const mp_bitcnt_t bits = static_cast<mp_bitcnt_t>(limbs) * GMP_NUMB_BITS;
+    mpz_class a = rng.get_z_bits(bits);
+    mpz_class b = rng.get_z_bits(bits);
+    const mpz_class expected = a * b;
+
+    mpz_class resA = a;
+    multiply_impl(resA.get_mpz_t(), resA.get_mpz_t(), b.get_mpz_t(), DEFAULT_CUTOFF, 0, 0);
+    ASSERT_EQ(resA, expected);
+
+    mpz_class resB = b;
+    multiply_impl(resB.get_mpz_t(), a.get_mpz_t(), resB.get_mpz_t(), DEFAULT_CUTOFF, 0, 0);
+    ASSERT_EQ(resB, expected);
+
+    // Square in place
+    mpz_class resSq = a;
+    multiply_impl(resSq.get_mpz_t(), resSq.get_mpz_t(), resSq.get_mpz_t(), DEFAULT_CUTOFF, 0, 0);
+    ASSERT_EQ(resSq, a * a);
+  }
+}
+
+TEST_CASE(Karatsuba, ExtremeAsymmetry) {
+  gmp_randclass rng(gmp_randinit_mt);
+  rng.seed(9999UL);
+
+  for (std::size_t smallLimbs : {1, 33, 65}) {
+    const mpz_class large = rng.get_z_bits(1000 * GMP_NUMB_BITS);
+    const mpz_class small = rng.get_z_bits(smallLimbs * GMP_NUMB_BITS);
+    const mpz_class expected = large * small;
+
+    ASSERT_EQ(multiply(large, small, DEFAULT_CUTOFF), expected);
+    ASSERT_EQ(multiply(small, large, DEFAULT_CUTOFF), expected);
+  }
+}

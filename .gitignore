@@ -363,3 +363,7 @@ MigrationBackup/
 FodyWeavers.xsd
 # Local CMake build output
 /build/
+/build-*/
+benchmark_results.csv
+benchmark_results.dat
+

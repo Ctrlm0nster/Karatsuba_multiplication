@@ -18,6 +18,10 @@ option(KARATSUBA_BUILD_BENCHMARKS "Build the benchmark executable" ON)
 option(KARATSUBA_ENABLE_WARNINGS "Enable strict compiler warnings" ON)
 option(KARATSUBA_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(KARATSUBA_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(KARATSUBA_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+
+# Find Threads library for multi-threading
+find_package(Threads REQUIRED)
 
 # Find GMP and GMPXX libraries
 find_package(PkgConfig QUIET)
@@ -66,6 +70,11 @@ function(karatsuba_apply_warnings target_name)
         target_compile_options(${target_name} PRIVATE -fsanitize=undefined)
         target_link_options(${target_name} PRIVATE -fsanitize=undefined)
     endif()
+
+    if(KARATSUBA_ENABLE_TSAN AND NOT MSVC)
+        target_compile_options(${target_name} PRIVATE -fsanitize=thread -fno-omit-frame-pointer)
+        target_link_options(${target_name} PRIVATE -fsanitize=thread)
+    endif()
 endfunction()
 
 # -----------------------------------------------------------------------------
@@ -73,6 +82,7 @@ endfunction()
 # -----------------------------------------------------------------------------
 add_library(karatsuba_core
     src/karatsuba.cpp
+    src/toom3.cpp
     src/schoolbook.cpp
     src/parser.cpp
     src/timer.cpp
@@ -89,6 +99,7 @@ target_include_directories(karatsuba_core
 target_link_libraries(karatsuba_core
     PUBLIC
         PkgConfig::GMPXX
+        Threads::Threads
 )
 
 karatsuba_apply_warnings(karatsuba_core)
@@ -124,6 +135,8 @@ if(BUILD_TESTING)
         tests/test_main.cpp
         tests/test_schoolbook.cpp
         tests/test_karatsuba.cpp
+        tests/test_toom3.cpp
+        tests/test_concurrency.cpp
         tests/test_parser.cpp
         tests/test_timer.cpp
     )

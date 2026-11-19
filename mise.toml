@@ -20,18 +20,23 @@ depends = ["build"]
 run = "ctest --test-dir build --output-on-failure"
 
 [tasks.benchmark]
-description = "Run the Karatsuba vs Schoolbook multiplication benchmark"
+description = "Run the multiplication benchmark (Schoolbook vs Karatsuba vs Toom-Cook vs Parallel vs GMP)"
 depends = ["build"]
 run = "./build/karatsuba_benchmark"
 
 [tasks.cli]
-description = "Run the Karatsuba interactive CLI calculator"
+description = "Run the interactive CLI calculator and performance showcase"
 depends = ["build"]
 run = "./build/karatsuba_cli"
 
+[tasks.plot]
+description = "Run benchmark and generate scaling curves via gnuplot / matplotlib"
+depends = ["build"]
+run = "./scripts/generate_plots.sh"
+
 [tasks.clean]
-description = "Clean CMake build artifacts"
-run = "rm -rf build build-sanitize"
+description = "Clean CMake build artifacts and benchmark plots"
+run = "rm -rf build build-sanitize build-tsan benchmark_results.* benchmark_plot.*"
 
 [tasks.format]
 description = "Auto-format all C++ source and header files with clang-format"
@@ -48,3 +53,15 @@ cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DKARATSUBA_ENABLE_ASAN=ON
 cmake --build build-sanitize -j
 ctest --test-dir build-sanitize --output-on-failure
 """
+
+[tasks."sanitize:thread"]
+description = "Build and run test suite with ThreadSanitizer to verify thread safety and race conditions"
+run = """
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DKARATSUBA_ENABLE_TSAN=ON
+cmake --build build-tsan -j
+ctest --test-dir build-tsan --output-on-failure
+"""
+
+[tasks.tsan]
+description = "Alias for sanitize:thread"
+depends = ["sanitize:thread"]

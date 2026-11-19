@@ -13,18 +13,21 @@
 #include "karatsuba/karatsuba.hpp"
 #include "karatsuba/schoolbook.hpp"
 #include "karatsuba/terminal_color.hpp"
+#include "karatsuba/toom3.hpp"
 #include "karatsuba/version.hpp"
 
 namespace {
 
 using Clock = std::chrono::steady_clock;
-using MultiplyFn = mpz_class (*)(const mpz_class&, const mpz_class&);
 
 struct BenchmarkConfig {
-  std::size_t cutoff = km::DEFAULT_CUTOFF;
+  std::size_t karaCutoff = km::DEFAULT_CUTOFF;
+  std::size_t toomCutoff = km::DEFAULT_TOOM_CUTOFF;
+  std::size_t parCutoff = km::DEFAULT_PARALLEL_CUTOFF;
   std::size_t maxLimbs = 2048;
-  std::size_t batches = 5;
+  std::size_t batches = 3;
   bool outputCsv = false;
+  bool outputDat = false;
   bool outputMarkdown = false;
   bool includeGmp = true;
 };
@@ -33,20 +36,18 @@ mpz_class gmpMultiply(const mpz_class& left, const mpz_class& right) {
   return left * right;
 }
 
-double measure(MultiplyFn fn, const mpz_class& left, const mpz_class& right,
-               const mpz_class& expected) {
+template <typename Fn>
+double measure(Fn&& fn, const mpz_class& left, const mpz_class& right, const mpz_class& expected) {
   const auto start = Clock::now();
   std::size_t count = 0;
   mpz_class result;
   Clock::time_point end;
 
   do {
-    for (int i = 0; i < 16; ++i) {
-      result = fn(left, right);
-    }
-    count += 16;
+    result = fn(left, right);
+    ++count;
     end = Clock::now();
-  } while (end - start < std::chrono::milliseconds(5));
+  } while (end - start < std::chrono::milliseconds(4) && count < 1000);
 
   if (result != expected) {
     throw std::runtime_error("Product differs from reference value!");
@@ -58,16 +59,16 @@ double measure(MultiplyFn fn, const mpz_class& left, const mpz_class& right,
 void printHelp(std::string_view name) {
   std::cout << "Usage: " << name << " [OPTIONS]\n\n"
             << "Options:\n"
-            << "  -h, --help            Show this help message and exit\n"
-            << "  -c, --cutoff <N>      Set Karatsuba cutoff in limbs (default: 32)\n"
-            << "  -m, --max-limbs <N>   Set maximum operand limb size (default: "
-               "2048)\n"
-            << "  -b, --batches <N>     Number of timing batches per size (default: "
-               "5)\n"
-            << "  --csv                 Output results in CSV format\n"
-            << "  --markdown            Output results in Markdown table format\n"
-            << "  --no-gmp              Exclude native GMP multiplication "
-               "comparison\n";
+            << "  -h, --help               Show this help message and exit\n"
+            << "  -c, --cutoff <N>         Set Karatsuba cutoff in limbs (default: 32)\n"
+            << "  -t, --toom-cutoff <N>    Set Toom-3 cutoff in limbs (default: 64)\n"
+            << "  -p, --parallel-cutoff <N> Set parallel cutoff in limbs (default: 256)\n"
+            << "  -m, --max-limbs <N>      Set maximum operand limb size (default: 2048)\n"
+            << "  -b, --batches <N>        Number of timing batches per size (default: 3)\n"
+            << "  --csv                    Output results in CSV format\n"
+            << "  --dat                    Output results in whitespace-separated DAT format\n"
+            << "  --markdown               Output results in Markdown table format\n"
+            << "  --no-gmp                 Exclude native GMP multiplication comparison\n";
 }
 
 }  // namespace
@@ -82,13 +83,19 @@ int main(int argc, char* argv[]) {
       return 0;
     }
     if ((arg == "-c" || arg == "--cutoff") && i + 1 < argc) {
-      config.cutoff = static_cast<std::size_t>(std::stoul(argv[++i]));
+      config.karaCutoff = static_cast<std::size_t>(std::stoul(argv[++i]));
+    } else if ((arg == "-t" || arg == "--toom-cutoff") && i + 1 < argc) {
+      config.toomCutoff = static_cast<std::size_t>(std::stoul(argv[++i]));
+    } else if ((arg == "-p" || arg == "--parallel-cutoff") && i + 1 < argc) {
+      config.parCutoff = static_cast<std::size_t>(std::stoul(argv[++i]));
     } else if ((arg == "-m" || arg == "--max-limbs") && i + 1 < argc) {
       config.maxLimbs = static_cast<std::size_t>(std::stoul(argv[++i]));
     } else if ((arg == "-b" || arg == "--batches") && i + 1 < argc) {
       config.batches = static_cast<std::size_t>(std::stoul(argv[++i]));
     } else if (arg == "--csv") {
       config.outputCsv = true;
+    } else if (arg == "--dat") {
+      config.outputDat = true;
     } else if (arg == "--markdown") {
       config.outputMarkdown = true;
     } else if (arg == "--no-gmp") {
@@ -99,9 +106,8 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  const std::vector<std::size_t> allLimbCounts{8,   16,  24,   32,   40,   48,   64,  80,
-                                               96,  128, 160,  192,  256,  320,  384, 512,
-                                               640, 768, 1024, 1536, 2048, 3072, 4096};
+  const std::vector<std::size_t> allLimbCounts{8,   16,  24,  32,  48,   64,   96,   128,  192,
+                                               256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096};
 
   std::vector<std::size_t> limbCounts;
   for (std::size_t count : allLimbCounts) {
@@ -116,51 +122,66 @@ int main(int argc, char* argv[]) {
   gmp_randclass random(gmp_randinit_mt);
   random.seed(42UL);
 
-  const bool color = (!config.outputCsv && !config.outputMarkdown) && km::color::isColorSupported();
-  mp_bitcnt_t firstWin = 0;
+  const bool plainOutput = (config.outputCsv || config.outputDat || config.outputMarkdown);
+  const bool color = !plainOutput && km::color::isColorSupported();
 
   if (config.outputCsv) {
-    std::cout << "Bits,Limbs,Schoolbook_us,Karatsuba_us,Speedup";
+    std::cout << "Bits,Limbs,Schoolbook_us,Karatsuba_us,Karatsuba_Par_us,Toom3_us,Toom3_Par_us";
     if (config.includeGmp) {
       std::cout << ",GMP_us";
     }
     std::cout << "\n";
+  } else if (config.outputDat) {
+    std::cout << "# Bits Limbs Schoolbook_us Karatsuba_us Karatsuba_Par_us Toom3_us Toom3_Par_us";
+    if (config.includeGmp) {
+      std::cout << " GMP_us";
+    }
+    std::cout << "\n";
   } else if (config.outputMarkdown) {
-    std::cout << "| Bits | Limbs | Schoolbook (us) | Karatsuba (us) | "
-                 "Karatsuba Speedup |";
+    std::cout << "| Bits | Limbs | Schoolbook (us) | Karatsuba (us) | Karatsuba Par (us) "
+                 "| Toom-3 (us) | Toom-3 Par (us) |";
     if (config.includeGmp) {
       std::cout << " GMP Native (us) |";
     }
-    std::cout << "\n| ---: | ---: | ---: | ---: | ---: |";
+    std::cout << "\n| ---: | ---: | ---: | ---: | ---: | ---: | ---: |";
     if (config.includeGmp) {
       std::cout << " ---: |";
     }
     std::cout << "\n";
   } else {
     std::cout << km::color::bold(color) << km::color::cyan(color)
-              << "============================================================="
-                 "===========\n"
-              << "                 GMP Integer Multiplication Benchmark\n"
-              << "============================================================="
-                 "===========\n"
+              << "================================================================================="
+                 "=======\n"
+              << "                 GMP Integer Multiplication Algorithm Benchmark\n"
+              << "================================================================================="
+                 "=======\n"
               << km::color::reset(color) << "Median time per product across " << config.batches
-              << " batches. Lower is faster.\n"
-              << "Karatsuba recursion cutoff: " << config.cutoff << " limbs ("
-              << (config.cutoff * GMP_NUMB_BITS) << " bits).\n\n"
-              << km::color::bold(color) << std::setw(14) << "Bits" << std::setw(12) << "Limbs"
-              << std::setw(18) << "Schoolbook (us)" << std::setw(18) << "Karatsuba (us)"
-              << std::setw(20) << "Karatsuba Speedup";
+              << " batches (lower is faster).\n"
+              << "Karatsuba cutoff: " << config.karaCutoff
+              << " limbs, Toom-3 cutoff: " << config.toomCutoff
+              << " limbs, Parallel cutoff: " << config.parCutoff << " limbs.\n\n"
+              << km::color::bold(color) << std::setw(10) << "Bits" << std::setw(8) << "Limbs"
+              << std::setw(15) << "Schoolbook" << std::setw(15) << "Karatsuba" << std::setw(16)
+              << "Karatsuba Par" << std::setw(15) << "Toom-3" << std::setw(16) << "Toom-3 Par";
     if (config.includeGmp) {
-      std::cout << std::setw(18) << "GMP Native (us)";
+      std::cout << std::setw(15) << "GMP Native";
     }
     std::cout << km::color::reset(color) << '\n'
-              << std::string(config.includeGmp ? 100 : 82, '-') << '\n'
-              << std::fixed << std::setprecision(3);
+              << std::string(config.includeGmp ? 110 : 95, '-') << '\n'
+              << std::fixed << std::setprecision(2);
   }
 
-  // Wrapper for karatsuba with cutoff
-  auto karatsubaWithCutoff = [](const mpz_class& a, const mpz_class& b) -> mpz_class {
-    return km::multiply(a, b);
+  auto karaFn = [&](const mpz_class& a, const mpz_class& b) {
+    return km::multiply(a, b, config.karaCutoff, false);
+  };
+  auto karaParFn = [&](const mpz_class& a, const mpz_class& b) {
+    return km::multiply(a, b, config.karaCutoff, true, config.parCutoff);
+  };
+  auto toomFn = [&](const mpz_class& a, const mpz_class& b) {
+    return km::toom3(a, b, config.karaCutoff, config.toomCutoff, false);
+  };
+  auto toomParFn = [&](const mpz_class& a, const mpz_class& b) {
+    return km::toom3(a, b, config.karaCutoff, config.toomCutoff, true, config.parCutoff);
   };
 
   for (const std::size_t limbs : limbCounts) {
@@ -171,87 +192,69 @@ int main(int argc, char* argv[]) {
     mpz_setbit(right.get_mpz_t(), bits - 1);
     const mpz_class expected = left * right;
 
-    std::vector<double> schoolbookTimes(config.batches);
-    std::vector<double> karatsubaTimes(config.batches);
-    std::vector<double> gmpTimes(config.batches);
+    std::vector<double> sTimes(config.batches);
+    std::vector<double> kTimes(config.batches);
+    std::vector<double> kpTimes(config.batches);
+    std::vector<double> tTimes(config.batches);
+    std::vector<double> tpTimes(config.batches);
+    std::vector<double> gTimes(config.batches);
 
     for (std::size_t i = 0; i < config.batches; ++i) {
-      if (i % 2 == 0) {
-        schoolbookTimes[i] = measure(km::schoolbook, left, right, expected);
-        karatsubaTimes[i] = measure(karatsubaWithCutoff, left, right, expected);
-      } else {
-        karatsubaTimes[i] = measure(karatsubaWithCutoff, left, right, expected);
-        schoolbookTimes[i] = measure(km::schoolbook, left, right, expected);
-      }
+      sTimes[i] = measure(km::schoolbook, left, right, expected);
+      kTimes[i] = measure(karaFn, left, right, expected);
+      kpTimes[i] = measure(karaParFn, left, right, expected);
+      tTimes[i] = measure(toomFn, left, right, expected);
+      tpTimes[i] = measure(toomParFn, left, right, expected);
       if (config.includeGmp) {
-        gmpTimes[i] = measure(gmpMultiply, left, right, expected);
+        gTimes[i] = measure(gmpMultiply, left, right, expected);
       }
     }
 
-    std::sort(schoolbookTimes.begin(), schoolbookTimes.end());
-    std::sort(karatsubaTimes.begin(), karatsubaTimes.end());
-    std::sort(gmpTimes.begin(), gmpTimes.end());
+    std::sort(sTimes.begin(), sTimes.end());
+    std::sort(kTimes.begin(), kTimes.end());
+    std::sort(kpTimes.begin(), kpTimes.end());
+    std::sort(tTimes.begin(), tTimes.end());
+    std::sort(tpTimes.begin(), tpTimes.end());
+    std::sort(gTimes.begin(), gTimes.end());
 
-    const double sTime = schoolbookTimes[config.batches / 2];
-    const double kTime = karatsubaTimes[config.batches / 2];
-    const double gTime = config.includeGmp ? gmpTimes[config.batches / 2] : 0.0;
-
-    const bool recursed = (limbs > config.cutoff);
-    const bool kWon = (kTime < sTime);
-    const double speedup = sTime / kTime;
-
-    if (recursed && kWon && firstWin == 0) {
-      firstWin = bits;
-    }
+    const std::size_t mid = config.batches / 2;
+    const double sVal = sTimes[mid];
+    const double kVal = kTimes[mid];
+    const double kpVal = kpTimes[mid];
+    const double tVal = tTimes[mid];
+    const double tpVal = tpTimes[mid];
+    const double gVal = config.includeGmp ? gTimes[mid] : 0.0;
 
     if (config.outputCsv) {
-      std::cout << bits << ',' << limbs << ',' << sTime << ',' << kTime << ',' << speedup;
+      std::cout << bits << ',' << limbs << ',' << sVal << ',' << kVal << ',' << kpVal << ',' << tVal
+                << ',' << tpVal;
       if (config.includeGmp) {
-        std::cout << ',' << gTime;
+        std::cout << ',' << gVal;
+      }
+      std::cout << '\n';
+    } else if (config.outputDat) {
+      std::cout << bits << ' ' << limbs << ' ' << sVal << ' ' << kVal << ' ' << kpVal << ' ' << tVal
+                << ' ' << tpVal;
+      if (config.includeGmp) {
+        std::cout << ' ' << gVal;
       }
       std::cout << '\n';
     } else if (config.outputMarkdown) {
-      std::cout << "| " << bits << " | " << limbs << " | " << std::fixed << std::setprecision(3)
-                << sTime << " | " << kTime << " | ";
-      if (recursed) {
-        std::cout << speedup << "x";
-      } else {
-        std::cout << "base case";
-      }
-      std::cout << " |";
+      std::cout << "| " << bits << " | " << limbs << " | " << std::fixed << std::setprecision(2)
+                << sVal << " | " << kVal << " | " << kpVal << " | " << tVal << " | " << tpVal
+                << " |";
       if (config.includeGmp) {
-        std::cout << " " << gTime << " |";
+        std::cout << " " << gVal << " |";
       }
       std::cout << '\n';
     } else {
-      std::cout << std::setw(14) << bits << std::setw(12) << limbs << std::setw(18) << sTime
-                << std::setw(18) << kTime;
-
-      if (recursed) {
-        std::cout << (kWon ? km::color::green(color) : km::color::yellow(color)) << std::setw(19)
-                  << speedup << 'x' << km::color::reset(color);
-      } else {
-        std::cout << std::setw(20) << "base case";
-      }
-
+      std::cout << std::setw(10) << bits << std::setw(8) << limbs << std::setw(15) << sVal
+                << std::setw(15) << kVal << std::setw(16) << kpVal << std::setw(15) << tVal
+                << std::setw(16) << tpVal;
       if (config.includeGmp) {
-        std::cout << std::setw(18) << gTime;
+        std::cout << std::setw(15) << gVal;
       }
       std::cout << '\n';
-    }
-  }
-
-  if (!config.outputCsv && !config.outputMarkdown) {
-    std::cout << '\n';
-    if (firstWin == 0) {
-      std::cout << km::color::yellow(color)
-                << "Karatsuba did not outperform schoolbook at the sampled sizes.\n"
-                << km::color::reset(color);
-    } else {
-      std::cout << km::color::bold(color) << km::color::green(color)
-                << "[*] First sampled Karatsuba win: " << firstWin << " bits per operand ("
-                << (firstWin / GMP_NUMB_BITS) << " limbs).\n"
-                << km::color::reset(color);
     }
   }
 
